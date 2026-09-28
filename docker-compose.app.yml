@@ -1,0 +1,91 @@
+services:
+  ad-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ads_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ads_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks:
+      - marketplace
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - marketplace
+
+  ad-migrate:
+    build:
+      context: .
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@ad-postgres:5432/ads_db
+    depends_on:
+      ad-postgres:
+        condition: service_healthy
+    networks:
+      - marketplace
+
+  ad-service:
+    build:
+      context: .
+    command: ["uv", "run", "python", "-m", "bin.api"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@ad-postgres:5432/ads_db
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+      AUTH_SERVICE_URL: http://auth-service:8000
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+    depends_on:
+      ad-postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      ad-migrate:
+        condition: service_completed_successfully
+    networks:
+      - marketplace
+
+  ad-outbox-relay:
+    build:
+      context: .
+    command: ["uv", "run", "python", "-m", "bin.outbox"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@ad-postgres:5432/ads_db
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+    depends_on:
+      ad-postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      ad-migrate:
+        condition: service_completed_successfully
+    networks:
+      - marketplace
+
+networks:
+  marketplace:
+    name: marketplace
+    external: true
+
+volumes:
+  pgdata:
