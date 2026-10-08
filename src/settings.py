@@ -1,11 +1,13 @@
 from urllib.parse import quote_plus
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", populate_by_name=True
+    )
 
     postgres_host: str = "localhost"
     postgres_database_name: str = "ads_db"
@@ -18,7 +20,12 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
-    kafka_bootstrap_servers: str = "localhost:9092"
+    # The LMS cluster injects the real broker as KAFKA_BROKERS next to a dummy
+    # KAFKA_BOOTSTRAP_SERVERS=localhost:9092, so KAFKA_BROKERS takes precedence.
+    kafka_bootstrap_servers: str = Field(
+        default="localhost:9092",
+        validation_alias=AliasChoices("KAFKA_BROKERS", "KAFKA_BOOTSTRAP_SERVERS"),
+    )
     kafka_topic_ads: str = "ads"
     auth_service_url: str = "http://localhost:8000"
 
