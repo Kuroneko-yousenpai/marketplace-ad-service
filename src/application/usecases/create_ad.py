@@ -1,6 +1,10 @@
+import logging
+
 from src.application.ports.uow import UnitOfWork
 from src.application.ports.usecases import CreateAdPort
 from src.domain.entities import Ad
+
+logger = logging.getLogger(__name__)
 
 
 class CreateAd(CreateAdPort):
@@ -27,4 +31,5 @@ class CreateAd(CreateAdPort):
             )
             await self._uow.outbox.add("ad.created", {"ad_id": ad.id})
             await self._uow.commit()
+        logger.info("ad %s created", ad.id)
         return ad
